@@ -205,7 +205,7 @@ def on_button_click1():
         print_to_box(traceback.format_exc())
     
     output_box.config(state="disabled")
-    # "on_button_click1" will find the critical points inside the constrained circle, on the surface of F, then it will use "classify_critical_points" to determine if the points are maximum, minimum, and saddle points then print findings to box
+    # "on_button_click1" will find the critical points inside the constrained circle, on the surface of F, then it will use "classify_critical_points" to determine if the points are maximum or minimum then print findings to box
 
 def print_to_box(*args):
     text = " ".join(str(a) for a in args) + "\n"
@@ -380,5 +380,6 @@ canvas3d.get_tk_widget().pack(side="right", fill="both", expand=True, pady=5)
 # Start the GUI event loop
 
 root.mainloop()
+
 
 
