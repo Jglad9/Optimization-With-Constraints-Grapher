@@ -3,7 +3,6 @@ from tkinter import ttk
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 import numpy as np
-import math as math
 import sympy as sp
 from sympy.parsing.sympy_parser import parse_expr
 
@@ -11,29 +10,46 @@ from sympy.parsing.sympy_parser import parse_expr
 x, y = sp.symbols('x y')
 
 #IMPORTANT DEFINITIONS----------------------------------------------------------------------------------------
-def Determine_Extrema(f, g, point):
+def classify_critical_point(f, g, point):
 
-    # First derivatives of g (gradient of constraint)
+    # Compute bordered Hessian components
     g_x = sp.diff(g, x)
     g_y = sp.diff(g, y)
-
-    # Second derivatives of f (Hessian of objective)
+    
     f_xx = sp.diff(f, x, 2)
     f_xy = sp.diff(f, x, y)
     f_yy = sp.diff(f, y, 2)
-
-    H = sp.Matrix([
+    
+    # Construct bordered Hessian matrix
+    H_bordered = sp.Matrix([
         [0,    g_x,   g_y],
         [g_x,  f_xx,  f_xy],
         [g_y,  f_xy,  f_yy]
     ])
-
-    # Evaluate at the point
-    H_sub = H.subs({x: point[0], y: point[1]})
-
-    return H_sub, sp.det(H_sub)
+    
+    # Evaluate at the critical point
+    H_eval = H_bordered.subs({x: point[0], y: point[1]})
+    det_H = sp.det(H_eval)
+    
+    # Classify based on determinant sign
+    try:
+        det_val = float(det_H)
+    except:
+        return "Inconclusive (evaluation error)"
+    
+    if abs(det_val) < 1e-10:
+        return "Inconclusive"
+    elif det_val < 0:
+        return "Minimum"
+    else:  # det_val > 0
+        return "Maximum"
 
 def on_button_click():
+    
+    output_box.config(state="normal")
+    output_box.delete("1.0", tk.END)
+    output_box.config(state="disabled")
+
     # Clear previous plots
     ax2d.clear()
     ax3d.clear()
@@ -64,6 +80,7 @@ def on_button_click():
         circle_z = np.zeros_like(circle_x)
 
     ax3d.plot(circle_x, circle_y, circle_z, color="red", linewidth=3, label="Circle on surface")
+    ax3d.set_title(f"3D: f(x,y) = {expr}")
 
     # ---- Circle on floor (z=0) ----
     circle_z_floor = np.zeros_like(circle_x)
@@ -77,80 +94,119 @@ def on_button_click():
     try:
         Z3 = eval(expr, {"x": X3, "y": Y3, "np": np})
         ax3d.plot_surface(X3, Y3, Z3, cmap="viridis")
-        # ---- Add 2D circle onto the 3D plot ----
-        t = np.linspace(0, 2*np.pi, 200)
-
-        # Draw circle on 3D
-        ax3d.plot(circle_x, circle_y, circle_z, color="red", linewidth=3)
-        ax3d.set_title(f"3D: f(x,y) = {expr}")
     except Exception as e:
         ax3d.text2D(0.1, 0.9, f"ERROR:\n{e}",
                     transform=ax3d.transAxes)
-
-    output_box.config(state="normal")
-    output_box.delete("1.0", tk.END)
-    output_box.config(state="disabled")
     
     canvas2d.draw()
     canvas3d.draw()
 
 def on_button_click1():
-
-    h = float(current_value_var.get())
-    k = float(current1_value_var.get())
-    R = float(current2_value_var.get())
-
-    g = (x-(h))**2 + (y-(k))**2 - (R)**2
-
-    expr1 = equation_var.get()
-    expr1 = expr1.replace("^", "**")    # allow ^ for power
-
-    f = sp.sympify(expr1)
+    output_box.config(state="normal")
+    output_box.delete("1.0", tk.END)
     
-    print_to_box("Function: " + str(f))
-    print_to_box("Constraint: " + str(g))
-
-    lam = sp.symbols('lam')
-    equations = [f.diff(x,1) - lam * g.diff(x,1),
-                 f.diff(y,1) - lam * g.diff(y,1),
-                 g]
+    try:
+        # Get the equation and constraint parameters
+        expr_str = equation_var.get().replace("^", "**")
+        h = float(current_value_var.get())
+        k = float(current1_value_var.get())
+        R = float(current2_value_var.get())
+        
+        # Put expression into a sympy expression
+        f = parse_expr(expr_str, local_dict={'x': x, 'y': y})
+        
+        # Define the constraint g(x,y) = (x-h)^2 + (y-k)^2 - R^2 = 0
+        g = (x - h)**2 + (y - k)**2 - R**2
+        
+        print_to_box(f"Surface Function: f(x,y) = {f}")
+        print_to_box(f"Constraint: g(x,y) = (x-{h})^2 + (y-{k})^2 - {R}^2 = 0")
+        
+        # gradients
+        f_x = sp.diff(f, x)
+        f_y = sp.diff(f, y)
+        g_x = sp.diff(g, x)
+        g_y = sp.diff(g, y)
+        
+        # Lagrange multiplier 
+        lam = sp.Symbol('lambda')
+        
+        # System of equations: 
+        eq1 = sp.Eq(f_x, lam * g_x)
+        eq2 = sp.Eq(f_y, lam * g_y)
+        eq3 = sp.Eq(g, 0)
+        
+        # Solve the system
+        solutions = sp.solve([eq1, eq2, eq3], [x, y, lam], dict=True)
+        
+        if not solutions:
+            print_to_box("No critical points found!")
+            output_box.config(state="disabled")
+            return
+        
+        print_to_box("Found " + str(len(solutions)) + " critical point(s):\n")
+        
+        # Evaluate and classify each critical point
+        critical_points = []
+        for i, sol in enumerate(solutions):
+            x_val = float(sol[x].evalf())
+            y_val = float(sol[y].evalf())
+            
+            # Check if point satisfies constraint
+            constraint_check = (x_val - h)**2 + (y_val - k)**2 - R**2
+            if abs(constraint_check) > 1e-6:
+                continue  # Skip if not on constraint
+            
+            f_val = float(f.subs({x: x_val, y: y_val}).evalf())
+            
+            # Classify the point
+            classification = classify_critical_point(f, g, (x_val, y_val))
+            
+            critical_points.append((x_val, y_val, f_val, classification))
+            
+            print_to_box(f"Point {i+1}:")
+            print_to_box(f"  (x, y) = ({x_val:.4f}, {y_val:.4f})")
+            print_to_box(f"  f(x, y) = {f_val:.4f}")
+            print_to_box(f"  Classification: {classification}\n")
+        
+        # Find global max and min
+        if critical_points:
+            f_values = [pt[2] for pt in critical_points]
+            max_val = max(f_values)
+            min_val = min(f_values)
+            
+            print_to_box("--- Summary ---")
+            print_to_box(f"Global Maximum: f = {max_val:.4f}")
+            print_to_box(f"Global Minimum: f = {min_val:.4f}")
+            
+            # Plot critical points on 2D graph
+            for pt in critical_points:
+                if pt[3] == "Maximum":
+                    ax2d.plot(pt[0], pt[1], 'ro', markersize=10, label='Max')
+                elif pt[3] == "Minimum":
+                    ax2d.plot(pt[0], pt[1], 'go', markersize=10, label='Min')
+                else:
+                    ax2d.plot(pt[0], pt[1], 'yo', markersize=10, label='Saddle')
+            
+            # Plot critical points on 3D graph
+            for pt in critical_points:
+                if pt[3] == "Maximum":
+                    ax3d.scatter([pt[0]], [pt[1]], [pt[2]], c='red', s=100, marker='o')
+                elif pt[3] == "Minimum":
+                    ax3d.scatter([pt[0]], [pt[1]], [pt[2]], c='green', s=100, marker='o')
+                else:
+                    ax3d.scatter([pt[0]], [pt[1]], [pt[2]], c='yellow', s=100, marker='o')
+            
+            canvas2d.draw()
+            canvas3d.draw()
+        
+    except Exception as e:
+        print_to_box(f"ERROR: {str(e)}")
+        import traceback
+        print_to_box(traceback.format_exc())
     
-    solution = sp.solve(equations, [x, y, lam])
-    print_to_box("There are " + str(len(solution)) + " solutions:")
-    #for i in range(len(solution)):
-        #print_to_box("(" + str(round(float(solution[i][0]),3)) + "," + str(round(float(solution[i][1]),3)) + ")")
+    output_box.config(state="disabled")
+    # "on_button_click1" will find the critical points inside the constrained circle, on the surface of F, then it will use "classify_critical_points" to determine if the points are maximum, minimum, and saddle points then print findings to box
 
-    BHA_list = []   # store all bordered hessian results
-
-    for i in range(len(solution)):
-        px = float(solution[i][0])
-        py = float(solution[i][1])
-        H_mat, H_det = Determine_Extrema(f, g, (px, py))
-        BHA_list.append((H_mat, H_det))
-
-    # Print the bordered Hessians
-    #for i, (H_mat, H_det) in enumerate(BHA_list):
-        #print_to_box(f"\nBordered Hessian for point {i+1}:")
-        #print_to_box(str(H_mat))
-        #print_to_box("Determinant = " + str(H_det))
-
-    final = []
-    for i in range(len(solution)):
-        final.append((str(round(float(solution[i][0]),3)), str(round(float(solution[i][1]),3)), BHA_list[i][1]))
-
-    def extrema(x):
-        if x > 0:
-            extrema_type = 'Minimum'
-        elif x < 0:
-            extrema_type = 'Maximum'
-        else:
-            extrema_type = 'TBD'
-            #code ts later
-        return extrema_type
-
-    for i in range(len(solution)):
-        print_to_box("Value " + str(int(i+1)) + " at (" + str(final[i][0]) + "," + str(final[i][1]) + ") is a " + str(extrema(final[i][2])))
-    
 def print_to_box(*args):
     text = " ".join(str(a) for a in args) + "\n"
     output_box.config(state="normal")
@@ -158,8 +214,8 @@ def print_to_box(*args):
     output_box.see(tk.END)
     output_box.config(state="disabled")
 
-#MAIN WIDGET ----------------------------------------------------------------------------------------
-# Main window (root)
+#MAIN WIDGET -------------------------------------------------------------------------------------------------
+# Main window
 root = tk.Tk()
 root.title("Multivariable Calculus Unit 14.7 - Optimization With Constraints")
 root.geometry("1200x600")         # window size (optional)
@@ -194,7 +250,7 @@ current_value_var = tk.StringVar(value=str(int(slider.get())))
 def on_slider_move(event):
     current_value_var.set(str(int(float(slider.get()))))
 
-slider.bind("<Motion>", on_slider_move)
+slider.bind("<ButtonRelease-1>", on_slider_move)
 slider_value_label = ttk.Label(tbox, textvariable=current_value_var)
 slider_value_label.pack(anchor="e", padx=10)
 #----------------------------------------------------------------
@@ -210,7 +266,7 @@ current1_value_var = tk.StringVar(value=str(int(slider1.get())))
 def on_slider1_move(event):
     current1_value_var.set(str(int(float(slider1.get()))))
 
-slider1.bind("<Motion>", on_slider1_move)
+slider1.bind("<ButtonRelease-1>", on_slider1_move)
 slider1_value_label = ttk.Label(tbox, textvariable=current1_value_var)
 slider1_value_label.pack(anchor="e", padx=10)
 #----------------------------------------------------------------
@@ -226,7 +282,7 @@ current2_value_var = tk.StringVar(value=str(int(slider2.get())))
 def on_slider2_move(event):
     current2_value_var.set(str(int(float(slider2.get()))))
 
-slider2.bind("<Motion>", on_slider2_move)
+slider2.bind("<ButtonRelease-1>", on_slider2_move)
 slider2_value_label = ttk.Label(tbox, textvariable=current2_value_var)
 slider2_value_label.pack(anchor="e", padx=10)
 
@@ -238,6 +294,7 @@ eq_label.pack(padx=10, pady=(10, 0))
 
 eq_entry = ttk.Entry(tbox, textvariable=equation_var)
 eq_entry.pack(padx=10, pady=(11,12), fill="x")
+
 
 # Bottom box inside left_frame containing the buttons
 box = ttk.Frame(left_frame, relief="solid")
@@ -323,3 +380,5 @@ canvas3d.get_tk_widget().pack(side="right", fill="both", expand=True, pady=5)
 # Start the GUI event loop
 
 root.mainloop()
+
+
